@@ -37,3 +37,11 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+Datasets/Raw/*.txt
+Datasets/Raw/*.dat
+Datasets/Raw/*.tsv
+Datasets/Raw/*.zip
+Datasets/Raw/*.csv
+Output/Etop_DIA_EC_two_methods/*.png
+Datasets/Raw/*.RData
+Datasets/Raw/ProteomeHD/*.txt
