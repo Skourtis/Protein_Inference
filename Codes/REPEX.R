@@ -56,14 +56,17 @@ file_input <- here::here("Datasets","Raw","ProteomeHD", "evidence.txt")
 DT <- fread(file_input, select = columns_to_read)
 
 #it seems that for mot cases, if the HL is NA and the ML is there,
-#then the ML is the real HL and when used agrees with the PG raio
+#then the ML is the real HL and when used agrees with the PG ratio
+#This is especially true for proteins with a single evidence
 DT[,`Ratio H/L normalized`:= fifelse(is.na(`Ratio H/L normalized`)  #& (!is.nan(`Ratio H/L normalized`))
                                      ,`Ratio M/L normalized`,`Ratio H/L normalized`)]
-# DT[,`Ratio H/L normalized`:= fifelse(is.nan(`Ratio M/L normalized`),NaN,`Ratio H/L normalized`)]
+
+## DT[,`Ratio H/L normalized`:= fifelse(is.nan(`Ratio M/L normalized`),NaN,`Ratio H/L normalized`)]
 DT$`Ratio H/L normalized`[!is.finite(DT$`Ratio H/L normalized`)] <- NA
+
 DT_cols <- fread(file_input, nrows = 1)
 
-Protein_groups_empty <- fread(input = here::here("Datasets","Raw","ProteomeHD", "proteinGroups.txt"), nrows = 2)
+#loading the proteins to get the evidence for a protein
 Protein_groups <- fread(input = here::here("Datasets","Raw","ProteomeHD", "proteinGroups.txt"), select = c("Intensity", "Protein IDs","Majority protein IDs", "Evidence IDs", "Peptide IDs"))
 
 `%out%` <- negate(`%in%`)
@@ -75,13 +78,13 @@ Protein_evidence <- Protein_groups %>%
   setDT() 
 Protein_evidence[,id := as.numeric(id)]
 
-evidence_used <-  Protein_evidence$id %>% unique()
-
+Protein_groups_empty <- fread(input = here::here("Datasets","Raw","ProteomeHD", "proteinGroups.txt"), nrows = 2)
 cols_of_interest <- colnames(Protein_groups_empty) %>% 
   str_subset("Majority|Ratio H/L normalized ")
 cols_Type <- colnames(Protein_groups_empty) %>% 
   str_subset("Majority|Ratio H/L normalized |H/L type| H/L iso-count ")
 
+#loading the proteins to get both the ratios but also the Type and how many IsoMSMS were used for quantification
 
 Long_protein_groups <- fread(input = here::here("Datasets","Raw","ProteomeHD", "proteinGroups.txt"), select = cols_of_interest)%>% 
   janitor::clean_names() %>%  
@@ -111,11 +114,11 @@ Iso <- Long_protein_groups_type %>%
        measure.vars = patterns("^ratio_h_l_iso"),
        variable.name = "Experiment", value.name = "iso_count") %>% 
   .[,Experiment := str_remove_all(Experiment,"ratio_h_l_iso_count_") ]
+
+# Counting number of ISOMSMS used for a protein
 Long_protein_groups_type <- Ratio[Type, on = .(majority_protein_i_ds==majority_protein_i_ds, Experiment== Experiment)
 ][Iso, on = .(majority_protein_i_ds==majority_protein_i_ds, Experiment== Experiment)
 ][,rm_iso := fifelse(iso_count == 0,T,F)]
-
-
 
 testing_evidence_sum <- DT[Protein_evidence, on = .(id = id)
 ][,leading_majority := str_remove_all(majority_protein_i_ds,";[:graph:]*$")
@@ -123,28 +126,35 @@ testing_evidence_sum <- DT[Protein_evidence, on = .(id = id)
   ][is.finite(`Ratio H/L normalized`)
 ]
 
+#cleaning the names of experiments
 fixed_exp_names <- data.table(Experiment_old = testing_evidence_sum$Experiment %>% unique)[,Experiment := janitor::make_clean_names(Experiment_old)]
 testing_evidence_sum <- testing_evidence_sum[fixed_exp_names, on = .(Experiment= Experiment_old)][,Experiment:=NULL]
 testing_evidence_sum <- setnames(testing_evidence_sum, c("i.Experiment"), c("Experiment"))
 
+#removing ISOMSMS not used for quantification and counting valid evidence per protein
 testing_evidence_sum <- testing_evidence_sum[Long_protein_groups_type[is.finite(h_l_ratio),], on = .(majority_protein_i_ds = majority_protein_i_ds, Experiment = Experiment)]
 testing_evidence_sum <- testing_evidence_sum[!(rm_iso == T & Type == "ISO-MSMS")][!is.na(`Ratio H/L normalized`)]
 evidence_n <-testing_evidence_sum[,.N,by = .(Experiment,majority_protein_i_ds)] 
 
+#median of valid evidence
 testing_evidence_sum<-testing_evidence_sum[,.(Prot_HL=median(`Ratio H/L normalized`,na.rm = T)), by = .(majority_protein_i_ds,Experiment)
 ]
 
+#combine with PG ratio
 PG_summary_comparison <- testing_evidence_sum[ Long_protein_groups, on = .(Experiment = Experiment,majority_protein_i_ds = majority_protein_i_ds)][
   , `:=`(Prot_HL = round(Prot_HL,3),
          Ratio = round(Ratio,3))
 ]
 
+#removing proteins which didn't arise from median (advanced ratio calculation)
 PG_summary_comparison <- PG_summary_comparison[,Identical := .(Prot_HL==Ratio)  
 ][evidence_n,on = .(majority_protein_i_ds = majority_protein_i_ds,Experiment= Experiment)
 ][,`:=`(difference = Prot_HL-Ratio)
 ][Long_protein_groups_type, on = .(majority_protein_i_ds = majority_protein_i_ds, Experiment = Experiment)
 ][type == "Median",]#[is.na(Prot_HL) |is.na(Ratio),]
 
+
+#plots
 PG_summary_comparison[Identical == T,N] %>% .[.<40] %>% 
   hist(breaks = 1000, main = "Hist of evidence number of Correct PG ratio", xlim = c(0,40))
 PG_summary_comparison[Identical == F,N] %>% .[.<40] %>% hist(breaks = 1000, main = "Hist of evidence number of Incorrect PG ratio", xlim = c(0,40))
