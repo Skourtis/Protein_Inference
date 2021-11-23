@@ -4,6 +4,8 @@
 columns_to_read <- c("Sequence", "Proteins", "Experiment", "Protein group IDs","Leading Razor Protein",
                      "Ratio H/L normalized", "Ratio M/L normalized", "Ratio H/M normalized",
                      "Reverse", "Potential contaminant")
+file_input <- here::here("Datasets","Raw","ProteomeHD", "evidence.txt")
+
 # Read in data
 DT <- fread(file_input, select = columns_to_read)
 # Drop reverse and contaminant peptides
@@ -58,6 +60,9 @@ correlations <- data.table()
 for(i in 1:length(unique(med_DT$Proteins))){
     tmp_protein <- unique(med_DT$Proteins)[i]
     tmp <- med_DT[ Proteins == tmp_protein ]
+    # Should we log 2 the median Ratio?  now the positive FC might have a larger influence on corr than negative
+    # tmp[, median_ratio := log2(median_ratio)]
+     # tmp %>% ggplot(aes(x  = Experiment, y = median_ratio, group = Sequence, colour = Sequence))+geom_point()+ggtitle(tmp_protein)
     tmp <- dcast(tmp, Experiment ~ Sequence, value.var = "median_ratio" )
     tmp$Experiment <- NULL
     #finding and removing correlations with less than 15 common datapoints
@@ -68,6 +73,7 @@ for(i in 1:length(unique(med_DT$Proteins))){
     tmp <- as.data.table( reshape2::melt( as.matrix( tmp  )))
     tmp <- tmp[, .( Peptide1 = as.character(Var1), Peptide2 = as.character(Var2), PCC = value ) ]
     tmp <- tmp[ Peptide1 > Peptide2 ][!is.nan(PCC)]
+    #if using leading razor, then we can then look back at a simplified evidence table to see if the peptides were unique or shared in Proteins
     tmp[, Protein := tmp_protein ]
     correlations <- rbind( correlations, tmp)
     setTxtProgressBar(pb, i)
@@ -82,58 +88,14 @@ evidence_selection <- c("Sequence",
                         "Ratio M/L normalized",
                         # "Ratio H/L normalized","Ratio H/M normalized", "PEP",
                         "Experiment")
-interesting_protein <- "P78371"
-file_input <- here::here("Datasets","Raw","ProteomeHD", "evidence.txt")
-# SQL_loading <-  read.csv.sql(here::here("Datasets","Raw","ProteomeHD", "evidence.txt"), sql = "select * from file where Proteins == 'P55011;P55011-3'")
-testing <- readr::read_delim_chunked(file_input, delim = "\t",
-                        callback = DataFrameCallback$new(function(x, pos) select(x,all_of(evidence_selection )) %>% 
-                                                             janitor::clean_names() %>% 
-                                                             subset(leading_razor_protein == interesting_protein))) %>% 
-    setDT
 sampling_evidence <- readr::read_delim_chunked(file_input, delim = "\t",chunk_size = 100000,
                                      callback = DataFrameCallback$new(function(x, pos) select(x,all_of(c("Proteins",#"Leading Proteins" ,
                                                                                                          "Leading Razor Protein"))) %>% 
                                                                           distinct())) %>% distinct() %>% 
     janitor::clean_names() %>% setDT
-# inte sampling_evidence %>% subset()
-# VRoom_loading <- vroom::vroom(here::here("Datasets","Raw","ProteomeHD", "evidence.txt"), col_select  = evidence_selection)
-# interesting_protein_df <- VRoom_loading %>% 
-#     subset(Proteins == interesting_protein)
 Protein_groups <- fread(input = here::here("Datasets","Raw","ProteomeHD", "proteinGroups.txt"), select = c("Intensity", "Protein IDs","Majority protein IDs")) %>%  
      janitor::clean_names() %>% 
     mutate(intensity = as.numeric(intensity)) 
-# %>% 
-    arrange(-intensity) %>% 
-    head(100)
- testing_identical_peptides <- fread(input = here::here("Datasets","Raw","ProteomeHD", "evidence.txt"), nrows =  1000) %>% 
-     janitor::clean_names()
-# testing_identical_peptides %>% subset(experiment == "g4_PX441_F5" & sequence == "ADLINNLGTIAK") %>% View()
-most_peptides <-testing_identical_peptides[, .N, by=.(leading_razor_protein)][order(-rank(N)),][1,1] %>% deframe()
-most_peptides_evidence_leading <- testing_identical_peptides[leading_razor_protein == most_peptides,]
- most_peptides_evidence <- most_peptides_evidence_leading[, .(median_intensity = median(ratio_m_l_normalized,na.rm = T)),c("sequence","experiment")]
-
-
-    most_peptides_evidence <- testing[, .(median_intensity = median(as.numeric(ratio_m_l_normalized),na.rm = T)),c("sequence","experiment")]
-testing2 <- most_peptides_evidence[!is.nan(median_intensity),c("sequence","median_intensity","experiment")] %>% 
-    dcast(.,
-          experiment~sequence ,
-          value.var = c("median_intensity"))
-selected_peptides <- colSums(is.na(testing2)) < (nrow(testing2)*0.5 )
-testing2 <- testing2[,..selected_peptides]
-combos <- combinat::combn(testing2[,!("experiment")] %>% colnames(),2,simplify = F) %>% 
-    set_names(.,purrr::map_chr(.x = .,~paste(.x[1],.x[2], sep = "_")))
-unique_peptides <- testing %>% 
-    subset(proteins == leading_razor_protein) %>% pull(sequence) %>% unique()
-Peptide_correlation <- function(peptides_pair){
-    # peptides_pair = combos[[1]]
-    if( (testing2[,..peptides_pair] %>% 
-        na.omit() %>% nrow())>30){
-         # cor(testing2 %>% pull(peptides_pair[1]),testing2 %>% pull(peptides_pair[2]),method = "pearson", use = "pairwise")
-        WGCNA::bicor(testing2 %>% pull(peptides_pair[1]),testing2 %>% pull(peptides_pair[2]),use = "pairwise.complete.obs")
-    }else{
-            NaN
-        }
-}
 Protein_summary <- purrr::map_dbl(combos,Peptide_correlation) %>% enframe("Pair","Correlation") %>% 
     separate(Pair, into = c("peptide1", "peptide2")) %>% 
     mutate(Pair_type = case_when(
