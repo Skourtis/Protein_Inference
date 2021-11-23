@@ -35,9 +35,6 @@ pacman::p_load(tidyverse,data.table)
 
 ###PROBLEMS
 
-##Proteins with no evidence but reported ratios in the ProteinGroup tables ####
-# Q9Y3C5 in experiment g1_px1194_p_ca1_1 has no evidence entries but has abundance in protein groups 0.103
-
 ##Proteins which have NaN in HL and values in ML, but do not use the values in ML
 # Q969P0-3;Q969P0 in g3_px597_b3_spr
 
@@ -167,11 +164,11 @@ PG_summary_comparison[!(is.na(Prot_HL)|is.na(Ratio))] %>%
 ggsave(here::here("Output","Silac_Ratio_PG_reconstruction.png"))
 
 
-# experiment = "g1_px1406_gm18858"
-# protein_id = "A0A183"
-# DT[,Experiment := tolower(Experiment)]
-# DT[str_detect(Proteins,protein_id) &  str_detect(Experiment,experiment)# & Type == "MULTI-MSMS"
-#    ,] 
+experiment = "g1_px1194_pca1_1"
+protein_id = "Q9Y3C5"
+DT[,Experiment := tolower(Experiment)]
+ DT[str_detect(Proteins,protein_id) &  str_detect(Experiment,experiment)# & Type == "MULTI-MSMS"
+    ,] 
 # testing_evidence_sum[str_detect(majority_protein_i_ds,protein_id) &  str_detect(Experiment,experiment)]
 # evidence_ids <- DT[str_detect(Proteins,protein_id) &  str_detect(Experiment,experiment),id]
 # Protein_evidence[id %chin% evidence_ids]
